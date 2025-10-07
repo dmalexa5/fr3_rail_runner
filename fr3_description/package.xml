@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>fr3_description</name>
+  <version>2.0.7</version>
+  <description>fr3 Resources used for MoveIt testing</description>
+
+  <author email="dmalexa5@ncsu.edu">David Alexander</author>
+
+  <maintainer email="dmalexa5@ncsu.edu">David Alexander</maintainer>
+
+  <license>Apache-2.0</license>
+  
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <export>
+      <build_type>ament_cmake</build_type>
+  </export>
+</package>

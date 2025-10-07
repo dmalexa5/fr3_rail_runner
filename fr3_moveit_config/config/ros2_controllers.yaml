@@ -1,0 +1,46 @@
+# This config file is used by ros2_control
+controller_manager:
+  ros__parameters:
+    update_rate: 500  # Hz
+
+    fr3_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+
+    hand_controller:
+      type: position_controllers/GripperActionController
+
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+fr3_arm_controller:
+  ros__parameters:
+    joints:
+      - fr3_joint_linear
+      - fr3_joint1
+      - fr3_joint2
+      - fr3_joint3
+      - fr3_joint4
+      - fr3_joint5
+      - fr3_joint6
+      - fr3_joint7
+    command_interfaces:
+      - effort
+    state_interfaces:
+      - position
+      - velocity
+    gains:
+      fr3_joint_linear: {p: 3000.0, i: 0.0, d: 100.0}
+      fr3_joint1:       {p: 3000.0, i: 0.0, d: 100.0}
+      fr3_joint2:       {p: 3000.0, i: 0.0, d: 100.0}
+      fr3_joint3:       {p: 3000.0, i: 0.0, d: 100.0}
+      fr3_joint4:       {p: 3000.0, i: 0.0, d: 100.0}
+      fr3_joint5:       {p: 3000.0, i: 0.0, d: 100.0}
+      fr3_joint6:       {p: 3000.0, i: 0.0, d: 100.0}
+      fr3_joint7:       {p: 3000.0, i: 0.0, d: 100.0}
+
+
+hand_controller:
+  ros__parameters:
+    joint: fr3_finger_joint1

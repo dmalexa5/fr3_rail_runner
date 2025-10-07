@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="fr3">
+    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+    <xacro:arg name="use_gazebo" default="false"/>
+
+    <link name="world"/>
+
+    <joint name="world_to_stationary" type="fixed">
+        <parent link="world"/>
+        <child link="fr3_link_stationary"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Import fr3 urdf file -->
+    <xacro:include filename="$(find fr3_description)/urdf/fr3.urdf" />
+
+    <!-- Import control_xacro -->
+    <xacro:include filename="fr3.ros2_control.xacro" />
+
+    <!-- Import ros2_control tag -->
+    <xacro:fr3_ros2_control 
+        name="FrankaSystem" 
+        initial_positions_file="$(arg initial_positions_file)" 
+        use_gazebo="$(arg use_gazebo)"/>
+
+    <!-- Gazebo plugin, if using gazebo -->
+    <xacro:if value="$(arg use_gazebo)">
+        <gazebo>
+            <plugin filename="libgz_ros2_control-system.so" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+                <robot_param>robot_description</robot_param>
+                <robot_param_node>robot_state_publisher</robot_param_node>
+                <parameters>$(find fr3_moveit_config)/config/ros2_controllers.yaml</parameters>
+            </plugin>
+        </gazebo>
+    </xacro:if>
+
+</robot>

@@ -1,0 +1,25 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: fr3_description
+    relative_path: urdf/fr3.urdf
+  srdf:
+    relative_path: config/fr3.srdf
+  package_settings:
+    author_name: David Alexander
+    author_email: dmalexa5@ncsu.edu
+    generated_timestamp: 1759280649
+  control_xacro:
+    command:
+      - effort
+    state:
+      - position
+      - velocity
+  modified_urdf:
+    xacros:
+      - control_xacro
+  control_xacro:
+    command:
+      - effort
+    state:
+      - position
+      - velocity
