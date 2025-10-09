@@ -1,53 +1,123 @@
 #include <fr3_custom_controllers/gravity_compensation_controller.hpp>
 
-#include <exception>
 #include <string>
+#include <vector>
+#include <exception>
+
+#include "rclcpp/qos.hpp"
+#include "rclcpp/time.hpp"
+#include "rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp"
+#include "rclcpp_lifecycle/state.hpp"
+
+#include <controller_interface/controller_interface.hpp>
+#include <hardware_interface/types/hardware_interface_type_values.hpp>
 
 namespace fr3_custom_controllers {
 
-  controller_interface::InterfaceConfiguration GravityCompensationController::command_interface_configuration() const {
-    controller_interface::InterfaceConfiguration config;
-    config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
+  GravityCompensationController::GravityCompensationController() : controller_interface::ControllerInterface() {}
 
-    //TODO: Change this hardcoded joint value
-    config.names.push_back("fr3_joint_linear/effort");
-    
-    for (int i = 1; i <= num_joints - 1; ++i) {
-      config.names.push_back(arm_id_ + "_joint" + std::to_string(i) + "/effort");
+  controller_interface::CallbackReturn GravityCompensationController::on_init()
+  {
+    joint_names_ = auto_declare<std::vector<std::string>>("joints", joint_names_);
+    command_interface_types_ =
+      auto_declare<std::vector<std::string>>("command_interfaces", command_interface_types_);
+    state_interface_types_ =
+      auto_declare<std::vector<std::string>>("state_interfaces", state_interface_types_);
+
+    return CallbackReturn::SUCCESS;
+  }
+
+  controller_interface::InterfaceConfiguration GravityCompensationController::command_interface_configuration() const
+  {
+    controller_interface::InterfaceConfiguration config = {
+      controller_interface::interface_configuration_type::INDIVIDUAL, {}
+    };
+
+    config.names.reserve(joint_names_.size() * command_interface_types_.size());
+
+    for (const auto & joint_name : joint_names_)
+    {
+      for (const auto & interface_type : command_interface_types_)
+      {
+        config.names.push_back(joint_name + "/" + interface_type);
+      }
     }
 
     return config;
   }
 
-  controller_interface::InterfaceConfiguration GravityCompensationController::state_interface_configuration() const {
-    return {}; // Return a default-constructed object controller_interface::InterfaceConfiguration
+  controller_interface::InterfaceConfiguration GravityCompensationController::state_interface_configuration() const
+  {
+    controller_interface::InterfaceConfiguration config = {
+      controller_interface::interface_configuration_type::INDIVIDUAL, {}
+    };
+
+    config.names.reserve(joint_names_.size() * state_interface_types_.size());
+    for (const auto & joint_name : joint_names_)
+    {
+      for (const auto & interface_type : state_interface_types_)
+      {
+        config.names.push_back(joint_name + "/" + interface_type);
+      }
+    }
+
+    return config;
+  }
+
+  controller_interface::CallbackReturn GravityCompensationController::on_configure(const rclcpp_lifecycle::State &)
+  {
+    RCLCPP_INFO(get_node()->get_logger(), "Automatically confirming configuration with no issues.");
+
+    return CallbackReturn::SUCCESS;
+  }
+
+  controller_interface::CallbackReturn GravityCompensationController::on_activate(const rclcpp_lifecycle::State &)
+  {
+    
+    // clear out vectors in case of restart
+    joint_effort_command_interface_.clear();
+    joint_position_state_interface_.clear();
+    joint_velocity_state_interface_.clear();
+
+    // assign command interfaces
+    for (auto & interface : command_interfaces_)
+    {
+      command_interface_map_[interface.get_interface_name()]->push_back(interface);
+    }
+
+    // assign state interfaces
+    for (auto & interface : state_interfaces_)
+    {
+      state_interface_map_[interface.get_interface_name()]->push_back(interface);
+    }
+
+    return CallbackReturn::SUCCESS;
   }
 
   controller_interface::return_type GravityCompensationController::update(
-    const rclcpp::Time& /*time*/,
-    const rclcpp::Duration& /*period*/) {
-  for (auto& command_interface : command_interfaces_) {
-    command_interface.set_value(0);
-  }
-  return controller_interface::return_type::OK;
+    const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/
+  )
+  {
+    
+    for (size_t i = 0; i < joint_effort_command_interface_.size(); i++)
+    {
+      try {
+        joint_effort_command_interface_[i].get().set_value(0); // set all commands to zero
+      } catch (const std::exception& e) {
+        RCLCPP_ERROR(get_node()->get_logger(), "Failed to set effort for index %ld: %s", i, e.what());
+      }
+    }
+
+    return controller_interface::return_type::OK;
   }
 
-  CallbackReturn GravityCompensationController::on_configure(
-    const rclcpp_lifecycle::State& /*previous_state*/) {
-  arm_id_ = "fr3"; //TODO: Change hardcoded value
-  
-  return CallbackReturn::SUCCESS;
-  }
+  // void go_to_zero_configuration(
 
-  CallbackReturn GravityCompensationController::on_init() {
-  try {
-    auto_declare<std::string>("arm_id", "fr3");
-  } catch (const std::exception& e) {
-    fprintf(stderr, "Exception thrown during init stage with message: %s \n", e.what());
-    return CallbackReturn::ERROR;
-  }
-  return CallbackReturn::SUCCESS;
-  }
+  // )
+  // {
+
+  //   return;
+  // }
 
 } 
 
