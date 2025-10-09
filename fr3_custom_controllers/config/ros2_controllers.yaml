@@ -1,0 +1,17 @@
+# This config file is used by ros2_control
+controller_manager:
+  ros__parameters:
+    update_rate: 500  # Hz
+
+    gravity_compensation_controller:
+      type: fr3_custom_controllers/GravityCompensationController
+
+    hand_controller:
+      type: position_controllers/GripperActionController
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+hand_controller:
+  ros__parameters:
+    joint: fr3_finger_joint1
