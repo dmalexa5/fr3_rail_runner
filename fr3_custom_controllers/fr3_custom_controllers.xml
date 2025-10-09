@@ -1,0 +1,8 @@
+<library path="fr3_custom_controllers">
+    <class name="fr3_custom_controllers/OperationalSpaceController"
+           type="fr3_custom_controllers::OperationalSpaceController" base_class_type="controller_interface::ControllerInterface">
+        <description>
+            Computes the operational space control law
+        </description>
+    </class>
+</library>
