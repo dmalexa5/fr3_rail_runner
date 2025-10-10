@@ -30,7 +30,8 @@ find_package(Eigen3 REQUIRED)
 add_library(
         ${PROJECT_NAME}
         SHARED
-        src/gravity_compensation_controller.cpp)
+        src/gravity_compensation_controller.cpp
+        src/joint_pd_controller.cpp)
 
 target_include_directories(
         ${PROJECT_NAME}

@@ -39,7 +39,7 @@ def generate_launch_description():
         [
             FindPackageShare('fr3_custom_controllers'),
             'config',
-            'ros2_controllers.yaml',
+            'gravity_compensation_controller.yaml',
         ]
     )
     
