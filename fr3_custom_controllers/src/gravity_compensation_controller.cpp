@@ -102,7 +102,7 @@ namespace fr3_custom_controllers {
     for (size_t i = 0; i < joint_effort_command_interface_.size(); i++)
     {
       try {
-        joint_effort_command_interface_[i].get().set_value(0); // set all commands to zero
+        joint_effort_command_interface_[i].get().set_value(1); // set all commands to zero
       } catch (const std::exception& e) {
         RCLCPP_ERROR(get_node()->get_logger(), "Failed to set effort for index %ld: %s", i, e.what());
       }
@@ -110,14 +110,6 @@ namespace fr3_custom_controllers {
 
     return controller_interface::return_type::OK;
   }
-
-  // void go_to_zero_configuration(
-
-  // )
-  // {
-
-  //   return;
-  // }
 
 } 
 

@@ -32,22 +32,22 @@ namespace fr3_custom_controllers {
       return CallbackReturn::ERROR;
     }
 
-    try
-    {
-      for (const auto &joint_name : joint_names_) {
-        auto p = auto_declare<double>("gains." + joint_name + ".p", 0.0);
-        auto d = auto_declare<double>("gains." + joint_name + ".d", 0.0);
+    // try
+    // {
+    //   for (const auto &joint_name : joint_names_) {
+    //     auto p = auto_declare<double>("gains." + joint_name + ".p", 0.0);
+    //     auto d = auto_declare<double>("gains." + joint_name + ".d", 0.0);
 
-        RCLCPP_INFO(get_node()->get_logger(), "Got gains for %s - p: %f d: %f", joint_name.c_str(), p, d);
+    //     RCLCPP_INFO(get_node()->get_logger(), "Got gains for %s - p: %f d: %f", joint_name.c_str(), p, d);
 
-        joint_gains_[joint_name] = {p, d};
-      }
-    }
-    catch(const std::exception& e)
-    {
-      RCLCPP_ERROR(get_node()->get_logger(), "Unable to find gains. Are they defined in the controller config file?");
-      return CallbackReturn::ERROR;
-    }
+    //     joint_gains_[joint_name] = {p, d};
+    //   }
+    // }
+    // catch(const std::exception& e)
+    // {
+    //   RCLCPP_ERROR(get_node()->get_logger(), "Unable to find gains. Are they defined in the controller config file?");
+    //   return CallbackReturn::ERROR;
+    // }
     
     return CallbackReturn::SUCCESS;
   }
@@ -92,13 +92,13 @@ namespace fr3_custom_controllers {
   controller_interface::CallbackReturn JointPDController::on_configure(const rclcpp_lifecycle::State &)
   {
 
-    std::vector<double*> p_gains_;
-    std::vector<double*> d_gains_;
+    // std::vector<double*> p_gains_;
+    // std::vector<double*> d_gains_;
 
-    for (const auto &joint_name : joint_names_) {
-      p_gains_.push_back(&joint_gains_[joint_name].p);
-      d_gains_.push_back(&joint_gains_[joint_name].d);
-    }
+    // for (const auto &joint_name : joint_names_) {
+    //   p_gains_.push_back(&joint_gains_[joint_name].p);
+    //   d_gains_.push_back(&joint_gains_[joint_name].d);
+    // }
     
     RCLCPP_INFO(get_node()->get_logger(), "Automatically confirming configuration with no issues.");
 
@@ -143,25 +143,45 @@ namespace fr3_custom_controllers {
         RCLCPP_ERROR(get_node()->get_logger(), "Failed to set effort for joint index %zu: %s", i, e.what());
       }
     }
+
+    return CallbackReturn::SUCCESS;
   }
 
   controller_interface::return_type JointPDController::update(
     const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/
   )
   {
-    
     for (size_t i = 0; i < joint_effort_command_interface_.size(); i++)
     {
-
-      double effort = p_gains
-
-      joint_effort_command_interface_[i].get().set_value(0); // set all commands to zero
+      try {
+        joint_effort_command_interface_[i].get().set_value(3); // set all commands to zero
+      } catch (const std::exception& e) {
+        RCLCPP_ERROR(get_node()->get_logger(), "Failed to set effort for index %ld: %s", i, e.what());
+      }
     }
+    // for (size_t i = 0; i < joint_effort_command_interface_.size(); i++)
+    // {
+
+    //   q = joint_position_state_interface_[i].get().get_value();
+    //   qd = joint_velocity_state_interface_[i].get().get_value();
+
+    //   tau = std::clamp(3000 * q + 100 * qd, -100.0, 100.0); // desired joint positions are all zero
+
+
+
+    //   try
+    //   {
+    //     joint_effort_command_interface_[i].get().set_value(tau);
+    //   }
+    //   catch(const std::exception& e)
+    //   {
+    //     RCLCPP_ERROR(get_node()->get_logger(), "Failed to set effort value for index %ld", i);
+    //   }
+    // }
 
     return controller_interface::return_type::OK;
   }
 
-  
 } 
 
 #include "pluginlib/class_list_macros.hpp"

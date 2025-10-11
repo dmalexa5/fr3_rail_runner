@@ -52,6 +52,12 @@ namespace fr3_custom_controllers {
 
     private:
       
+      double q; // current joint position
+      double qd; // current joint velocity
+
+      double tau; //output torque
+
+
 
       std::unordered_map<std::string, JointGains> joint_gains_;
 
