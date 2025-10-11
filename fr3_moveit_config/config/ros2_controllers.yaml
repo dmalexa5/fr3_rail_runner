@@ -39,7 +39,7 @@ fr3_arm_controller:
       fr3_joint5:       {p: 3000.0, i: 0.0, d: 100.0}
       fr3_joint6:       {p: 3000.0, i: 0.0, d: 100.0}
       fr3_joint7:       {p: 3000.0, i: 0.0, d: 100.0}
-
+    open_loop_control: false
 
 hand_controller:
   ros__parameters:
