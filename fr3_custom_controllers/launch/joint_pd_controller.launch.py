@@ -88,7 +88,7 @@ def generate_launch_description():
             robot_controllers,
             ],
     )
-    gravity_compensation_controller_spawner = Node(
+    joint_pd_controller_spawner = Node(
         package='controller_manager',
         executable='spawner',
         arguments=[
@@ -129,7 +129,7 @@ def generate_launch_description():
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=joint_state_broadcaster_spawner,
-                on_exit=[gripper_controller_spawner, gravity_compensation_controller_spawner],
+                on_exit=[gripper_controller_spawner, joint_pd_controller_spawner],
             )
         ),
         DeclareLaunchArgument(
