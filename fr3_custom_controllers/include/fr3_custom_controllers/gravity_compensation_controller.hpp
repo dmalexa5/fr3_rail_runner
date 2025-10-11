@@ -25,9 +25,9 @@ namespace fr3_custom_controllers {
     public:
       GravityCompensationController();
 
-      controller_interface::InterfaceConfiguration command_interface_configuration() const override;
+      [[nodiscard]] controller_interface::InterfaceConfiguration command_interface_configuration() const override;
 
-      controller_interface::InterfaceConfiguration state_interface_configuration() const override;
+      [[nodiscard]] controller_interface::InterfaceConfiguration state_interface_configuration() const override;
 
       controller_interface::return_type update(
         const rclcpp::Time & time, const rclcpp::Duration & period) override;
@@ -39,6 +39,7 @@ namespace fr3_custom_controllers {
 
       controller_interface::CallbackReturn on_activate(
         const rclcpp_lifecycle::State & previous_state) override;
+
 
     private:
       
@@ -53,16 +54,16 @@ namespace fr3_custom_controllers {
       std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>>
         joint_velocity_state_interface_;
 
-      std::unordered_map<
-        std::string, std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> *>
-        command_interface_map_ = {
-          {"effort", &joint_effort_command_interface_}};
+      // std::unordered_map<
+      //   std::string, std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> *>
+      //   command_interface_map_ = {
+      //     {"effort", &joint_effort_command_interface_}};
 
-      std::unordered_map<
-        std::string, std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> *>
-        state_interface_map_ = {
-          {"position", &joint_position_state_interface_},
-          {"velocity", &joint_velocity_state_interface_}};
+      // std::unordered_map<
+      //   std::string, std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> *>
+      //   state_interface_map_ = {
+      //     {"position", &joint_position_state_interface_},
+      //     {"velocity", &joint_velocity_state_interface_}};
       };
 
 }
