@@ -42,7 +42,20 @@ namespace fr3_custom_controllers {
   controller_interface::CallbackReturn JointPDController::on_configure(const rclcpp_lifecycle::State &)
   {
 
-    RCLCPP_INFO(get_node()->get_logger(), "Automatically confirming configuration with no issues.");
+    qdes.resize(8);
+
+    auto callback = [this](const std::shared_ptr<std_msgs::msg::Float64MultiArray> msg_) -> void
+    {
+      RCLCPP_INFO(get_node()->get_logger(), "Received new joint positions.");
+      joint_msg_external_ptr.writeFromNonRT(msg_);
+      new_msg_ = true;
+    };
+
+    joint_command_subscriber =
+    get_node()->create_subscription<std_msgs::msg::Float64MultiArray>(
+      "~/joint_command", rclcpp::SystemDefaultsQoS(), callback);
+
+    RCLCPP_INFO(get_node()->get_logger(), "Subscription to ~/joint_command created succesffully.");
 
     return CallbackReturn::SUCCESS;
   }
@@ -120,21 +133,46 @@ namespace fr3_custom_controllers {
     const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/
   )
   {
-    for (size_t i = 0; i < joint_position_state_interface_.size(); i++) {
-      q = joint_position_state_interface_[i].get().get_value();
-      qd = joint_velocity_state_interface_[i].get().get_value();
 
-      tau = -3000 * q + -100 * qd;
-      
-      RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 100,
-        "Got joint %zu position %.2f, velocity %.2f, and commanded effort %.2f",
-        i, q, qd, tau);
-
-      joint_effort_command_interface_[i].get().set_value(tau);
-
+    if (new_msg_)
+    {
+      joint_msg_ = *joint_msg_external_ptr.readFromRT();
+      new_msg_ = false;
     }
 
+    if (joint_msg_ != nullptr)
+    {
+      for (size_t i = 0; i < joint_position_state_interface_.size(); i++) {
+
+        qdes = joint_msg_.get()->data;
+
+        RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+          "Got desired join positions [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+          qdes[0], qdes[1], qdes[2], qdes[3], qdes[4], qdes[5], qdes[6], qdes[7]);
+        
+        q = joint_position_state_interface_[i].get().get_value();
+        qd = joint_velocity_state_interface_[i].get().get_value();
+
+        tau = 3000 * (qdes[i] - q) + -100 * qd;
+        
+        RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+          "Got joint %zu position %.2f, velocity %.2f, and commanded effort %.2f",
+          i, q, qd, tau);
+
+        joint_effort_command_interface_[i].get().set_value(tau);
+
+      }      
+    }
+
+
     return controller_interface::return_type::OK;
+  }
+
+  controller_interface::CallbackReturn JointPDController::on_deactivate(const rclcpp_lifecycle::State &)
+  {
+    release_interfaces();
+
+    return CallbackReturn::SUCCESS;
   }
 
 }
