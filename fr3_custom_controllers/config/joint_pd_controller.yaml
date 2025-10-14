@@ -7,7 +7,7 @@ controller_manager:
 
 joint_pd_controller:
   ros__parameters:
-    type: fr3_custom_controllers/GravityCompensationController
+    type: fr3_custom_controllers/JointPDController
     joints:
       - fr3_joint_linear
       - fr3_joint1

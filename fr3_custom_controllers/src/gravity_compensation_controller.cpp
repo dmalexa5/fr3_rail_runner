@@ -122,7 +122,7 @@ namespace fr3_custom_controllers {
     // RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000, "Update running...");
     
     for (auto& command_interface : joint_effort_command_interface_) {
-      command_interface.get().set_value(0);
+      command_interface.get().set_value(-15);
     }
     return controller_interface::return_type::OK;
   }

@@ -18,39 +18,75 @@ namespace fr3_custom_controllers {
 
   controller_interface::CallbackReturn JointPDController::on_init()
   {
-    try 
-    {
+
+    try {
       joint_names_ = auto_declare<std::vector<std::string>>("joints", joint_names_);
+
       command_interface_types_ =
         auto_declare<std::vector<std::string>>("command_interfaces", command_interface_types_);
+    
       state_interface_types_ =
         auto_declare<std::vector<std::string>>("state_interfaces", state_interface_types_);
-    } 
-    catch (const std::exception& e) 
-    {
-      RCLCPP_ERROR(get_node()->get_logger(), "Could not initialize joints!");
+
+    }
+    catch (const std::exception& e) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Exception thrown during init stage with message: %s \n", e.what());
       return CallbackReturn::ERROR;
     }
 
-    // try
-    // {
-    //   for (const auto &joint_name : joint_names_) {
-    //     auto p = auto_declare<double>("gains." + joint_name + ".p", 0.0);
-    //     auto d = auto_declare<double>("gains." + joint_name + ".d", 0.0);
+    RCLCPP_INFO(get_node()->get_logger(), "Controller has been initialized.");
 
-    //     RCLCPP_INFO(get_node()->get_logger(), "Got gains for %s - p: %f d: %f", joint_name.c_str(), p, d);
-
-    //     joint_gains_[joint_name] = {p, d};
-    //   }
-    // }
-    // catch(const std::exception& e)
-    // {
-    //   RCLCPP_ERROR(get_node()->get_logger(), "Unable to find gains. Are they defined in the controller config file?");
-    //   return CallbackReturn::ERROR;
-    // }
-    
     return CallbackReturn::SUCCESS;
   }
+
+  controller_interface::CallbackReturn JointPDController::on_configure(const rclcpp_lifecycle::State &)
+  {
+
+    qdes.resize(8);
+
+    auto callback = [this](const std::shared_ptr<std_msgs::msg::Float64MultiArray> msg_) -> void
+    {
+      RCLCPP_INFO(get_node()->get_logger(), "Received new joint positions.");
+      joint_msg_external_ptr.writeFromNonRT(msg_);
+      new_msg_ = true;
+    };
+
+    joint_command_subscriber =
+    get_node()->create_subscription<std_msgs::msg::Float64MultiArray>(
+      "~/joint_command", rclcpp::SystemDefaultsQoS(), callback);
+
+    RCLCPP_INFO(get_node()->get_logger(), "Subscription to ~/joint_command created succesffully.");
+
+    return CallbackReturn::SUCCESS;
+  }
+
+  controller_interface::CallbackReturn JointPDController::on_activate(const rclcpp_lifecycle::State &)
+  {
+
+    joint_effort_command_interface_.clear();
+    joint_position_state_interface_.clear();
+    joint_velocity_state_interface_.clear();
+
+    for (auto & interface : command_interfaces_)
+    {
+      if (interface.get_interface_name() == hardware_interface::HW_IF_EFFORT)
+        joint_effort_command_interface_.push_back(std::ref(interface));
+    }
+
+    for (auto & interface : state_interfaces_)
+    {
+      if (interface.get_interface_name() == hardware_interface::HW_IF_POSITION)
+        joint_position_state_interface_.push_back(std::ref(interface));
+      if (interface.get_interface_name() == hardware_interface::HW_IF_VELOCITY)
+        joint_velocity_state_interface_.push_back(std::ref(interface));
+    }
+
+    RCLCPP_INFO(get_node()->get_logger(), "JointPDController activated with %zu joints",
+                joint_effort_command_interface_.size());
+
+    return CallbackReturn::SUCCESS;
+  }
+
 
   controller_interface::InterfaceConfiguration JointPDController::command_interface_configuration() const
   {
@@ -67,6 +103,8 @@ namespace fr3_custom_controllers {
         config.names.push_back(joint_name + "/" + interface_type);
       }
     }
+
+    RCLCPP_INFO(get_node()->get_logger(), "Command interfaces have been configured.");
 
     return config;
   }
@@ -86,103 +124,58 @@ namespace fr3_custom_controllers {
       }
     }
 
+    RCLCPP_INFO(get_node()->get_logger(), "State interfaces have been configured.");
+
     return config;
-  }
-
-  controller_interface::CallbackReturn JointPDController::on_configure(const rclcpp_lifecycle::State &)
-  {
-
-    // std::vector<double*> p_gains_;
-    // std::vector<double*> d_gains_;
-
-    // for (const auto &joint_name : joint_names_) {
-    //   p_gains_.push_back(&joint_gains_[joint_name].p);
-    //   d_gains_.push_back(&joint_gains_[joint_name].d);
-    // }
-    
-    RCLCPP_INFO(get_node()->get_logger(), "Automatically confirming configuration with no issues.");
-
-    return CallbackReturn::SUCCESS;
-  }
-
-  controller_interface::CallbackReturn JointPDController::on_activate(const rclcpp_lifecycle::State &)
-  {
-    
-    // clear out vectors in case of restart
-    joint_effort_command_interface_.clear();
-    joint_position_state_interface_.clear();
-    joint_velocity_state_interface_.clear();
-
-    // assign command interfaces
-    for (auto & interface : command_interfaces_)
-    {
-      command_interface_map_[interface.get_interface_name()]->push_back(interface);
-    }
-
-    // assign state interfaces
-    for (auto & interface : state_interfaces_)
-    {
-      state_interface_map_[interface.get_interface_name()]->push_back(interface);
-    }
-
-    return CallbackReturn::SUCCESS;
-  }
-
-  controller_interface::CallbackReturn JointPDController::on_deactivate(const rclcpp_lifecycle::State &)
-  {
-    RCLCPP_INFO(get_node()->get_logger(), "Deactivating controller, zeroing efforts...");
-
-    for (size_t i = 0; i < joint_effort_command_interface_.size(); ++i)
-    {
-      try
-      {
-        joint_effort_command_interface_[i].get().set_value(0.0);
-      }
-      catch (const std::exception &e)
-      {
-        RCLCPP_ERROR(get_node()->get_logger(), "Failed to set effort for joint index %zu: %s", i, e.what());
-      }
-    }
-
-    return CallbackReturn::SUCCESS;
   }
 
   controller_interface::return_type JointPDController::update(
     const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/
   )
   {
-    for (size_t i = 0; i < joint_effort_command_interface_.size(); i++)
+
+    if (new_msg_)
     {
-      try {
-        joint_effort_command_interface_[i].get().set_value(3); // set all commands to zero
-      } catch (const std::exception& e) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Failed to set effort for index %ld: %s", i, e.what());
-      }
+      joint_msg_ = *joint_msg_external_ptr.readFromRT();
+      new_msg_ = false;
     }
-    // for (size_t i = 0; i < joint_effort_command_interface_.size(); i++)
-    // {
 
-    //   q = joint_position_state_interface_[i].get().get_value();
-    //   qd = joint_velocity_state_interface_[i].get().get_value();
+    if (joint_msg_ != nullptr)
+    {
+      for (size_t i = 0; i < joint_position_state_interface_.size(); i++) {
 
-    //   tau = std::clamp(3000 * q + 100 * qd, -100.0, 100.0); // desired joint positions are all zero
+        qdes = joint_msg_.get()->data;
 
+        RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+          "Got desired join positions [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+          qdes[0], qdes[1], qdes[2], qdes[3], qdes[4], qdes[5], qdes[6], qdes[7]);
+        
+        q = joint_position_state_interface_[i].get().get_value();
+        qd = joint_velocity_state_interface_[i].get().get_value();
 
+        tau = 3000 * (qdes[i] - q) + -100 * qd;
+        
+        RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+          "Got joint %zu position %.2f, velocity %.2f, and commanded effort %.2f",
+          i, q, qd, tau);
 
-    //   try
-    //   {
-    //     joint_effort_command_interface_[i].get().set_value(tau);
-    //   }
-    //   catch(const std::exception& e)
-    //   {
-    //     RCLCPP_ERROR(get_node()->get_logger(), "Failed to set effort value for index %ld", i);
-    //   }
-    // }
+        joint_effort_command_interface_[i].get().set_value(tau);
+
+      }      
+    }
+
 
     return controller_interface::return_type::OK;
   }
 
-} 
+  controller_interface::CallbackReturn JointPDController::on_deactivate(const rclcpp_lifecycle::State &)
+  {
+    release_interfaces();
+
+    return CallbackReturn::SUCCESS;
+  }
+
+}
 
 #include "pluginlib/class_list_macros.hpp"
 
