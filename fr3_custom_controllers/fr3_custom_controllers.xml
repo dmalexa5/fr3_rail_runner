@@ -8,7 +8,13 @@
     <class name="fr3_custom_controllers/JointPDController"
            type="fr3_custom_controllers::JointPDController" base_class_type="controller_interface::ControllerInterface">
         <description>
-            Test controller that holds the arm vertical with pd control
+            Holds the arm at a set position with pd control
+        </description>
+    </class>
+    <class name="fr3_custom_controllers/OperationalSpaceController"
+           type="fr3_custom_controllers::OperationalSpaceController" base_class_type="controller_interface::ControllerInterface">
+        <description>
+            Uses operational space control to move the end effector in cartesian space
         </description>
     </class>
 </library>
