@@ -12,6 +12,8 @@
 
 #include <rclcpp/duration.hpp>
 #include <rclcpp/time.hpp>
+#include <Eigen/Dense>
+#include <Eigen/Core>
 
 #include "rclcpp_lifecycle/lifecycle_publisher.hpp"
 #include "rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp"
@@ -19,6 +21,11 @@
 
 #include "controller_interface/controller_interface.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
+
+#include "controller_laws/osc_law.hpp"
+
+constexpr int N_JOINTS = 8;
+constexpr int M_TASK   = 6;
 
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
@@ -67,10 +74,18 @@ namespace fr3_custom_controllers {
       std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>>
         joint_velocity_state_interface_;
 
-      std::vector<double> qdes;
-      double q;
-      double qd;
-      double tau;
+      // Dynamics
+      Eigen::Matrix<double, N_JOINTS, N_JOINTS> M;
+      Vector8d C, G;
+
+      //Kinematics
+      Matrix68 J, Jdot;
+
+      // Task-space
+      Eigen::Matrix<double, M_TASK, 1> x, xdot, x_des, xdot_des, xddot_des;
+
+      //Gains
+      Matrix66 Kp, Kd;
       };
 
 }
