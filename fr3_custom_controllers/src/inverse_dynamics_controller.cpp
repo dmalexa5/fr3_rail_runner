@@ -37,6 +37,24 @@ namespace fr3_custom_controllers {
     return buffer.str();
   }
 
+  std::string eigen_str(const Vector8d& vec) {
+    std::stringstream ss;
+
+    ss << std::fixed << std::setprecision(4);
+    ss << "[";
+
+    for (int i = 0; i < vec.size(); ++i) {
+        ss << vec[i];
+        if (i < vec.size() - 1) {
+            ss << ", ";
+        }
+    }
+    ss << "]";
+
+    return ss.str();
+}
+
+
   InverseDynamicsController::InverseDynamicsController() : controller_interface::ControllerInterface(),
       model(),
       data(model)
@@ -199,74 +217,43 @@ namespace fr3_custom_controllers {
  controller_interface::return_type InverseDynamicsController::update(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  // Ensure vectors match model sizes
-  if (q.size()     != model.nq)  q.resize(model.nq);
-  if (q_des.size() != model.nq)  q_des.resize(model.nq);
-  if (qd.size()    != model.nv)  qd.resize(model.nv);
-  if (qd_des.size() != model.nv) qd_des.resize(model.nv);
-  if (qdd_des.size() != model.nv) qdd_des.resize(model.nv);
 
-  // initialize to zero so unmapped indices are safe
-  q.setZero();
-  qd.setZero();
-
-  // Read hardware state BUT place values into pinocchio indices (idx_q / idx_v)
   for (size_t i = 0; i < joint_position_state_interface_.size(); ++i) {
-    const std::string &name = joint_names_[i];
-    const auto jid = model.getJointId(name);
+
+    q[i] = joint_position_state_interface_[i].get().get_value();
+    qd[i] = joint_velocity_state_interface_[i].get().get_value();
+
     
-    if (jid >= model.joints.size()) {
-      RCLCPP_WARN(get_node()->get_logger(), "Joint %s not found in model", name.c_str());
-      continue;
-    }
-
-    const int iq = pinocchio::idx_q(model.joints[jid]); // index into q
-    const int iv = pinocchio::idx_v(model.joints[jid]); // index into qd / tau
-
-    if (iq >= 0 && iq < (int)q.size())
-      q[iq] = joint_position_state_interface_[i].get().get_value();
-
-    if (iv >= 0 && iv < (int)qd.size())
-      qd[iv] = joint_velocity_state_interface_[i].get().get_value();
   }
+  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500, "q: %s", eigen_str(q).c_str());
+  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500, "qd: %s", eigen_str(qd).c_str());
+  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500, "q_des: %s", eigen_str(q_des).c_str());
+  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500, "qd_des: %s", eigen_str(qd_des).c_str());
 
-  // FK and inverse dynamics (we assume q_des / qd_des / qdd_des are prepared elsewhere)
-  pinocchio::forwardKinematics(model, data, q, qd);
-  tau = pinocchio::rnea(model, data, q_des, qd_des, qdd_des);
+  //
+  // τ=M(q)[q¨​des​+Kd​(q˙​des​−q˙​)+Kp​(qdes​−q)]+C(q,q˙​)q˙​+g(q)
+  //
 
-  // Safe logging of first up-to-8 tau entries (won't crash if tau is shorter)
-  double tvals[8] = {0.,0.,0.,0.,0.,0.,0.,0.};
-  for (size_t k = 0; k < 8 && k < tau.size(); ++k) tvals[k] = tau[k];
+  pinocchio::computeAllTerms(model, data, q, qd);
 
-  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
-    "Tau size: %zu \nGot desired torques [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f]\ncmd interface size: %zu",
-    tau.size(), tvals[0], tvals[1], tvals[2], tvals[3], tvals[4], tvals[5], tvals[6], tvals[7],
-    joint_effort_command_interface_.size());
+  const double Kp = 300.0;
+  const double Kd = 10.0;
 
-  // Write commands: map controller joint i -> pinocchio tau at idx_v
-  for (size_t i = 0; i < joint_effort_command_interface_.size(); ++i) {
-    const std::string &name = joint_names_[i];
+  Eigen::VectorXd qdd_cmd = qdd_des + Kd * (qd_des - qd) + Kp * (q_des - q);
 
-    // Special-case user override for fr3_joint1
-    if (name == "fr3_joint1") {
-      joint_effort_command_interface_[i].get().set_value(8.0);
-      continue;
-    }
+  // Eigen::MatrixXd M = data.M; // Inertia matrix M(q)
+  // Eigen::VectorXd b = data.nle; // Nonlinear effects = C(q,qd)*qd + g(q)
 
-    const auto jid = model.getJointId(name);
-    if (jid >= model.joints.size()) {
-      RCLCPP_WARN(get_node()->get_logger(), "Joint %s not found in model", name.c_str());
-      joint_effort_command_interface_[i].get().set_value(0.0);
-      continue;
-    }
+  // Eigen::VectorXd tau = M * qdd_cmd + b;
 
-    const int iv = pinocchio::idx_v(model.joints[jid]);
-    if (iv >= 0 && iv < (int)tau.size()) {
-      joint_effort_command_interface_[i].get().set_value(tau[iv]);
-    } else {
-      RCLCPP_WARN(get_node()->get_logger(), "Invalid idx_v for joint %s (iv=%d)", name.c_str(), iv);
-      joint_effort_command_interface_[i].get().set_value(0.0);
-    }
+  tau = pinocchio::rnea(model, data, q, qd, qdd_cmd);
+
+  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500, "tau: %s", eigen_str(tau).c_str());
+
+  for (size_t i = 0; i< joint_effort_command_interface_.size(); i++) {
+    
+    joint_effort_command_interface_[i].get().set_value(tau[i]);
+    
   }
 
   return controller_interface::return_type::OK;
