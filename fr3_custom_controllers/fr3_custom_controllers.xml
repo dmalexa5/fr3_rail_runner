@@ -17,4 +17,10 @@
             Holds the arm at a set position with pd control
         </description>
     </class>
+    <class name="fr3_custom_controllers/OperationalSpaceController"
+           type="fr3_custom_controllers::OperationalSpaceController" base_class_type="controller_interface::ControllerInterface">
+        <description>
+            Goes to a specific pose using khatib operational space control
+        </description>
+    </class>
 </library>

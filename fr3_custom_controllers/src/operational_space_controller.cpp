@@ -1,4 +1,4 @@
-#include <fr3_custom_controllers/inverse_dynamics_controller.hpp>
+#include <fr3_custom_controllers/operational_space_controller.hpp>
 #include <fr3_custom_controllers/utils.hpp>
 
 #include <string>
@@ -28,19 +28,21 @@
 
 #include <controller_interface/controller_interface.hpp>
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
+#include <geometry_msgs/msg/pose.hpp>
 
 namespace fr3_custom_controllers {
 
-  InverseDynamicsController::InverseDynamicsController() : controller_interface::ControllerInterface(),
+
+  OperationalSpaceController::OperationalSpaceController() : controller_interface::ControllerInterface(),
       model(),
       data(model)
   {
 
   }
 
-  controller_interface::CallbackReturn InverseDynamicsController::on_init()
+  controller_interface::CallbackReturn OperationalSpaceController::on_init()
   {
-
+  
     try {
       joint_names_ = auto_declare<std::vector<std::string>>("joints", joint_names_);
       num_joints = joint_names_.size();
@@ -76,9 +78,10 @@ namespace fr3_custom_controllers {
         q0[q_index] = 0.0;
       }
       
-      // arm only pinocchio model
-      model = pinocchio::buildReducedModel(arm_model, frozen_joints, q0);
+      ee_name = "fr3_link8";
+      model = pinocchio::buildReducedModel(arm_model, frozen_joints, q0); // arm only pinocchio model
       data = pinocchio::Data(model);
+      ee_frame_idx = model.getFrameId(ee_name, pinocchio::FrameType::BODY);
     }
     catch (const std::exception& e) {
       RCLCPP_ERROR(get_node()->get_logger(), "Failed to load debug urdf: %s \n", e.what());
@@ -91,19 +94,50 @@ namespace fr3_custom_controllers {
     return CallbackReturn::SUCCESS;
   }
 
-  controller_interface::CallbackReturn InverseDynamicsController::on_configure(const rclcpp_lifecycle::State &)
+  controller_interface::CallbackReturn OperationalSpaceController::on_configure(const rclcpp_lifecycle::State &)
   {
-    
-    q = Vector8d::Zero();
-    q_des = Vector8d::Zero();
+    // allocate & zero
+    M.resize(num_joints, num_joints);       M.setZero();
+    Minv.resize(num_joints, num_joints);    Minv.setZero();
+    b.resize(num_joints);                   b.setZero();
 
-    qd = Vector8d::Zero();
-    qd_des = Vector8d::Zero();
+    J.resize(6, num_joints);                J.setZero();
+    Jtrans.resize(num_joints, 6);           Jtrans.setZero();
+    JJtrans.resize(6, 6);                   JJtrans.setZero();
+    Jpseudo.resize(num_joints, 6);          Jpseudo.setZero();
+    Jdot.resize(6, num_joints);             Jdot.setZero();
 
-    qdd = Vector8d::Zero();
-    qdd_des = Vector8d::Zero();
+    lambda.resize(6, 6);                    lambda.setZero();
+    Jdyncons.resize(num_joints, 6);         Jdyncons.setZero();
 
-    effort_limits = Vector8d::Constant(80.0);
+    // current pose set to identity transform (replace later with input pose)
+    geometry_msgs::msg::Pose pose_msg;
+    pose_msg.position.x = 0.26;
+    pose_msg.position.y = 0.43;
+    pose_msg.position.z = 0.58;
+    pose_msg.orientation.x = 0.9996;
+    pose_msg.orientation.y = -0.0024;
+    pose_msg.orientation.z = 0.0198;
+    pose_msg.orientation.w = 0.0219;
+
+    pose_cur = pose_to_SE3(pose_msg);
+
+    // gains (currently hardcoded)
+    kp = 300.0;
+    kd = 10.0;
+
+    // 6D vectors
+    x_err.setZero();
+    xd.setZero();
+    xdd_cmd.setZero();
+
+    // fixed-size 8x8 identity
+    I = Eigen::MatrixXd::Identity(8, 8);
+
+    // null-space torque as (n x 1) matrix
+    null_space_tau.resize(num_joints, 1);
+    null_space_tau.setZero();
+
 
     auto callback = [this](const std::shared_ptr<std_msgs::msg::Float64MultiArray> msg_) -> void
     {
@@ -121,7 +155,7 @@ namespace fr3_custom_controllers {
     return CallbackReturn::SUCCESS;
   }
 
-  controller_interface::CallbackReturn InverseDynamicsController::on_activate(const rclcpp_lifecycle::State &)
+  controller_interface::CallbackReturn OperationalSpaceController::on_activate(const rclcpp_lifecycle::State &)
   {
 
     joint_effort_command_interface_.clear();
@@ -142,14 +176,14 @@ namespace fr3_custom_controllers {
         joint_velocity_state_interface_.push_back(std::ref(interface));
     }
 
-    RCLCPP_INFO(get_node()->get_logger(), "InverseDynamicsController activated with %zu joints",
+    RCLCPP_INFO(get_node()->get_logger(), "OperationalSpaceController activated with %zu joints",
                 joint_effort_command_interface_.size());
 
     return CallbackReturn::SUCCESS;
   }
 
 
-  controller_interface::InterfaceConfiguration InverseDynamicsController::command_interface_configuration() const
+  controller_interface::InterfaceConfiguration OperationalSpaceController::command_interface_configuration() const
   {
     controller_interface::InterfaceConfiguration config = {
       controller_interface::interface_configuration_type::INDIVIDUAL, {}
@@ -170,7 +204,7 @@ namespace fr3_custom_controllers {
     return config;
   }
 
-  controller_interface::InterfaceConfiguration InverseDynamicsController::state_interface_configuration() const
+  controller_interface::InterfaceConfiguration OperationalSpaceController::state_interface_configuration() const
   {
     controller_interface::InterfaceConfiguration config = {
       controller_interface::interface_configuration_type::INDIVIDUAL, {}
@@ -190,7 +224,7 @@ namespace fr3_custom_controllers {
     return config;
   }
 
- controller_interface::return_type InverseDynamicsController::update(
+ controller_interface::return_type OperationalSpaceController::update(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
 
@@ -198,33 +232,14 @@ namespace fr3_custom_controllers {
 
     q[i] = joint_position_state_interface_[i].get().get_value();
     qd[i] = joint_velocity_state_interface_[i].get().get_value();
-
     
   }
-  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500, "q: %s", eigen_str(q).c_str());
-  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500, "qd: %s", eigen_str(qd).c_str());
-  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500, "q_des: %s", eigen_str(q_des).c_str());
-  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500, "qd_des: %s", eigen_str(qd_des).c_str());
 
-  //
-  // τ=M(q)[q¨​des​+Kd​(q˙​des​−q˙​)+Kp​(qdes​−q)]+C(q,q˙​)q˙​+g(q)
-  //
+  osc(q, qd, pose_des, tau);
 
-  pinocchio::computeAllTerms(model, data, q, qd);
-
-  const double Kp = 300.0;
-  const double Kd = 10.0;
-
-  Eigen::VectorXd qdd_cmd = qdd_des + Kd * (qd_des - qd) + Kp * (q_des - q);
-
-  // Eigen::MatrixXd M = data.M; // Inertia matrix M(q)
-  // Eigen::VectorXd b = data.nle; // Nonlinear effects = C(q,qd)*qd + g(q)
-
-  // Eigen::VectorXd tau = M * qdd_cmd + b;
-
-  tau = pinocchio::rnea(model, data, q, qd, qdd_cmd);
-
-  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500, "tau: %s", eigen_str(tau).c_str());
+  RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+    "Computed tau: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+    tau[0], tau[1], tau[2], tau[3], tau[4], tau[5], tau[6], tau[7]);
 
   for (size_t i = 0; i< joint_effort_command_interface_.size(); i++) {
     
@@ -233,10 +248,63 @@ namespace fr3_custom_controllers {
   }
 
   return controller_interface::return_type::OK;
-}
+  }
+
+  void OperationalSpaceController::osc(
+      const Vector8d& q,
+      const Vector8d& qd,
+      const pinocchio::SE3& pose_des,
+      Vector8d& tau
+  ) {
+
+    pinocchio::computeAllTerms(model, data, q, qd);
+    pinocchio::updateFramePlacements(model, data);
+    pose_cur = data.oMf[ee_frame_idx];
+
+    M = data.M;
+    Minv = M.inverse();
+    b = data.nle;
+
+    // compute jacobian variations
+    pinocchio::computeFrameJacobian(model, data, q, ee_frame_idx, J);
+
+    RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+      "Jacobian ---------\n %s", eigen_str(J).c_str());
 
 
-  controller_interface::CallbackReturn InverseDynamicsController::on_deactivate(const rclcpp_lifecycle::State &)
+    Jtrans = J.transpose();
+    JJtrans = J * Jtrans; // intermediate matrix, probably will use cholesky decomp later
+    Jpseudo = Jtrans * JJtrans.inverse();
+    Jdot = pinocchio::computeJointJacobiansTimeVariation(model, data, q, qd);
+
+    // task space inertia
+    lambda = (J * Minv * Jtrans).inverse();
+    
+    RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+      "lambda ---------\n %s", eigen_str(lambda).c_str());
+
+    // dynamically consistent jacobian
+    Jdyncons = Minv * Jtrans * lambda;
+
+    // task space acceleration
+    computePoseError(pose_des, pose_cur, x_err);
+    xd = pinocchio::getFrameVelocity(model, data, ee_frame_idx, pinocchio::WORLD).toVector();
+    xdd_cmd = kp * x_err + kd * (-xd); // Desired velocity and acceleration are zero
+
+    RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+      "xdd_cmd ---------\n %s", eigen_str(xdd_cmd).c_str());
+
+    // null space effort
+    null_space_tau = (I - Jtrans * Jpseudo.transpose()) * tau0;
+
+    // computed torque
+    tau = Jtrans * 
+      (lambda * xdd_cmd + (lambda * (J * Minv * b - Jdot * qd)))
+      + null_space_tau;
+  }
+
+
+  controller_interface::CallbackReturn OperationalSpaceController::on_deactivate(const rclcpp_lifecycle::State &)
   {
     release_interfaces();
 
@@ -247,4 +315,4 @@ namespace fr3_custom_controllers {
 
 #include "pluginlib/class_list_macros.hpp"
 
-PLUGINLIB_EXPORT_CLASS(fr3_custom_controllers::InverseDynamicsController, controller_interface::ControllerInterface)
+PLUGINLIB_EXPORT_CLASS(fr3_custom_controllers::OperationalSpaceController, controller_interface::ControllerInterface)
