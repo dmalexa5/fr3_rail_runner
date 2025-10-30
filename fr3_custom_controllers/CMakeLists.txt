@@ -33,7 +33,9 @@ add_library(
         ${PROJECT_NAME}
         SHARED
         src/gravity_compensation_controller.cpp
-        src/joint_pd_controller.cpp)
+        src/joint_pd_controller.cpp
+        src/inverse_dynamics_controller.cpp
+        src/operational_space_controller.cpp)
 
 target_include_directories(
         ${PROJECT_NAME}

@@ -1,0 +1,26 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 500  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+operational_space_controller:
+  ros__parameters:
+    type: fr3_custom_controllers/OperationalSpaceController
+    joints:
+      - fr3_joint_linear
+      - fr3_joint1
+      - fr3_joint2
+      - fr3_joint3
+      - fr3_joint4
+      - fr3_joint5
+      - fr3_joint6
+      - fr3_joint7
+
+    command_interfaces:
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
