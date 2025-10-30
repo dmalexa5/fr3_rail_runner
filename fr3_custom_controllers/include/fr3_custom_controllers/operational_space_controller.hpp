@@ -25,7 +25,7 @@
 #include "realtime_tools/realtime_buffer.hpp"
 
 #include "controller_interface/controller_interface.hpp"
-#include "std_msgs/msg/float64_multi_array.hpp"
+#include "geometry_msgs/msg/pose.hpp"
 
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
@@ -60,17 +60,17 @@ namespace fr3_custom_controllers {
       void osc(
         const Vector8d& q,
         const Vector8d& qd,
-        const pinocchio::SE3& pose_des,
+        const geometry_msgs::msg::Pose& pose_des,
         Vector8d& tau
       );
 
         
     private:
 
-      rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr joint_command_subscriber;
-      realtime_tools::RealtimeBuffer<std::shared_ptr<std_msgs::msg::Float64MultiArray>> joint_msg_external_ptr;
-      std::atomic<bool> new_msg_ = false;
-      std::shared_ptr<std_msgs::msg::Float64MultiArray> joint_msg_;
+      // rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr joint_command_subscriber;
+      // realtime_tools::RealtimeBuffer<std::shared_ptr<std_msgs::msg::Float64MultiArray>> joint_msg_external_ptr;
+      // std::atomic<bool> new_msg_ = false;
+      // std::shared_ptr<std_msgs::msg::Float64MultiArray> joint_msg_;
       
       
       std::vector<std::string> joint_names_;
@@ -88,18 +88,21 @@ namespace fr3_custom_controllers {
 
       std::string robot_description;
       std::string ee_name;
+      std::string base_name;
       
       pinocchio::Model model;
       pinocchio::Data data;
       pinocchio::FrameIndex ee_frame_idx;
-
-      double kp;
-      double kd;
+      pinocchio::FrameIndex base_frame_index;
+      
+      // Task space gains
+      Eigen::Vector<double, 6> kp;
+      Eigen::Vector<double, 6> kd;
       
       // Inputs to osc algorithm
       Vector8d q; // Current joint angles
       Vector8d qd; // Current joint velocities
-      pinocchio::SE3 pose_des; // Desired end effector pose
+      geometry_msgs::msg::Pose pose_des; // Desired end effector pose
       Vector8d tau0; // null space control torque (all zeros right now)
       
       // Used inside the algorithm
@@ -114,6 +117,10 @@ namespace fr3_custom_controllers {
       Eigen::MatrixXd lambda; // Task-space inertia
       Eigen::MatrixXd Jdyncons; // Dynamically consistent inverse
       pinocchio::SE3 pose_cur; // Currend end effector pose
+      Eigen::Vector3d trans_des;
+      Eigen::Vector3d trans_err;
+      Eigen::Quaterniond quat_des;
+      Eigen::Quaterniond quat_err;
       Vector6d x_err; // cartesian position error (orientation and position) (used in PD xdd_cmd calc)
       Vector6d xd; // cartesian end effector frame velocity
       Vector6d xdd_cmd; // commanded cartesian acceleration

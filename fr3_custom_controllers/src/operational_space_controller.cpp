@@ -28,7 +28,6 @@
 
 #include <controller_interface/controller_interface.hpp>
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
-#include <geometry_msgs/msg/pose.hpp>
 
 namespace fr3_custom_controllers {
 
@@ -79,9 +78,11 @@ namespace fr3_custom_controllers {
       }
       
       ee_name = "fr3_link8";
+      base_name = "fr3_link_stationary";
       model = pinocchio::buildReducedModel(arm_model, frozen_joints, q0); // arm only pinocchio model
       data = pinocchio::Data(model);
       ee_frame_idx = model.getFrameId(ee_name, pinocchio::FrameType::BODY);
+      base_frame_index = model.getFrameId(base_name, pinocchio::FrameType::FIXED_JOINT);
     }
     catch (const std::exception& e) {
       RCLCPP_ERROR(get_node()->get_logger(), "Failed to load debug urdf: %s \n", e.what());
@@ -110,21 +111,18 @@ namespace fr3_custom_controllers {
     lambda.resize(6, 6);                    lambda.setZero();
     Jdyncons.resize(num_joints, 6);         Jdyncons.setZero();
 
-    // current pose set to identity transform (replace later with input pose)
-    geometry_msgs::msg::Pose pose_msg;
-    pose_msg.position.x = 0.26;
-    pose_msg.position.y = 0.43;
-    pose_msg.position.z = 0.58;
-    pose_msg.orientation.x = 0.9996;
-    pose_msg.orientation.y = -0.0024;
-    pose_msg.orientation.z = 0.0198;
-    pose_msg.orientation.w = 0.0219;
-
-    pose_cur = pose_to_SE3(pose_msg);
+    // current desired pose (replace later with input pose)
+    pose_des.position.x = 0.26;
+    pose_des.position.y = 0.43;
+    pose_des.position.z = 0.58;
+    pose_des.orientation.x = 0.9996;
+    pose_des.orientation.y = -0.0024;
+    pose_des.orientation.z = 0.0198;
+    pose_des.orientation.w = 0.0219;
 
     // gains (currently hardcoded)
-    kp = 300.0;
-    kd = 10.0;
+    kp << 1000, 1000, 1000, 10, 10, 10;
+    kd.setConstant(100);
 
     // 6D vectors
     x_err.setZero();
@@ -139,18 +137,18 @@ namespace fr3_custom_controllers {
     null_space_tau.setZero();
 
 
-    auto callback = [this](const std::shared_ptr<std_msgs::msg::Float64MultiArray> msg_) -> void
-    {
-      RCLCPP_INFO(get_node()->get_logger(), "Received new joint positions.");
-      joint_msg_external_ptr.writeFromNonRT(msg_);
-      new_msg_ = true;
-    };
+    // auto callback = [this](const std::shared_ptr<std_msgs::msg::Float64MultiArray> msg_) -> void
+    // {
+    //   RCLCPP_INFO(get_node()->get_logger(), "Received new joint positions.");
+    //   joint_msg_external_ptr.writeFromNonRT(msg_);
+    //   new_msg_ = true;
+    // };
 
-    joint_command_subscriber =
-    get_node()->create_subscription<std_msgs::msg::Float64MultiArray>(
-      "~/joint_command", rclcpp::SystemDefaultsQoS(), callback);
+    // joint_command_subscriber =
+    // get_node()->create_subscription<std_msgs::msg::Float64MultiArray>(
+    //   "~/joint_command", rclcpp::SystemDefaultsQoS(), callback);
 
-    RCLCPP_INFO(get_node()->get_logger(), "Subscription to ~/joint_command created succesffully.");
+    // RCLCPP_INFO(get_node()->get_logger(), "Subscription to ~/joint_command created succesffully.");
 
     return CallbackReturn::SUCCESS;
   }
@@ -253,29 +251,26 @@ namespace fr3_custom_controllers {
   void OperationalSpaceController::osc(
       const Vector8d& q,
       const Vector8d& qd,
-      const pinocchio::SE3& pose_des,
+      const geometry_msgs::msg::Pose& pose_des,
       Vector8d& tau
   ) {
 
     pinocchio::computeAllTerms(model, data, q, qd);
     pinocchio::updateFramePlacements(model, data);
-    pose_cur = data.oMf[ee_frame_idx];
 
-    M = data.M;
-    Minv = M.inverse();
+    M = 0.5 * (data.M + data.M.transpose());
+    Minv = M.inverse(); // TODO: Cholesky decomposition of M
     b = data.nle;
 
-    // compute jacobian variations
-    pinocchio::computeFrameJacobian(model, data, q, ee_frame_idx, J);
+    RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+      "Mass matrix ---------\n %s", eigen_str(M).c_str());
 
+    // compute jacobian at end effector in world frame
+    J = pinocchio::getFrameJacobian(model, data, ee_frame_idx, pinocchio::WORLD);
+    Jtrans = J.transpose();
+    
     RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
       "Jacobian ---------\n %s", eigen_str(J).c_str());
-
-
-    Jtrans = J.transpose();
-    JJtrans = J * Jtrans; // intermediate matrix, probably will use cholesky decomp later
-    Jpseudo = Jtrans * JJtrans.inverse();
-    Jdot = pinocchio::computeJointJacobiansTimeVariation(model, data, q, qd);
 
     // task space inertia
     lambda = (J * Minv * Jtrans).inverse();
@@ -283,24 +278,37 @@ namespace fr3_custom_controllers {
     RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
       "lambda ---------\n %s", eigen_str(lambda).c_str());
 
-    // dynamically consistent jacobian
-    Jdyncons = Minv * Jtrans * lambda;
+    // current end effector pose
+    pose_cur = data.oMf[ee_frame_idx];
 
-    // task space acceleration
-    computePoseError(pose_des, pose_cur, x_err);
+    // task space translation error
+    trans_des << pose_des.position.x , pose_des.position.y, pose_des.position.z;
+    trans_err = trans_des - pose_cur.translation();
+
+    //task space orientation error
+    quat_des.coeffs() << pose_des.orientation.x,
+                        pose_des.orientation.y,
+                        pose_des.orientation.z,
+                        pose_des.orientation.w;
+    quat_des.normalize();
+    quat_err = Eigen::Quaterniond(pose_cur.rotation()) * quat_des.inverse();
+
+    // task space pose error (using decomposed translation and orientation)
+    x_err.topRows<3>() = trans_err;
+    x_err.bottomRows<3>() = quat_err.toRotationMatrix().eulerAngles(2, 1, 0);
+
+
+    RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+    "x_err ---------\n %s", eigen_str(x_err).c_str());
+
     xd = pinocchio::getFrameVelocity(model, data, ee_frame_idx, pinocchio::WORLD).toVector();
-    xdd_cmd = kp * x_err + kd * (-xd); // Desired velocity and acceleration are zero
+    xdd_cmd = kp.asDiagonal() * x_err + kd.asDiagonal() * (-xd); // Desired velocity and acceleration are zero
 
     RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
       "xdd_cmd ---------\n %s", eigen_str(xdd_cmd).c_str());
 
-    // null space effort
-    null_space_tau = (I - Jtrans * Jpseudo.transpose()) * tau0;
-
     // computed torque
-    tau = Jtrans * 
-      (lambda * xdd_cmd + (lambda * (J * Minv * b - Jdot * qd)))
-      + null_space_tau;
+    tau = Jtrans * lambda * xdd_cmd + b;
   }
 
 

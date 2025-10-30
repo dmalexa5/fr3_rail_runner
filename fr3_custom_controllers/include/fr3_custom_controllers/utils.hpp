@@ -69,26 +69,4 @@ namespace fr3_custom_controllers {
     buffer << file.rdbuf();
     return buffer.str();
   }
-
-  inline void computePoseError(
-    const pinocchio::SE3& pose_des,
-    const pinocchio::SE3& pose_cur,
-    Eigen::Matrix<double,6,1>& x_err)
-  {
-    const pinocchio::SE3 M_err = pose_cur.inverse() * pose_des;
-    const Eigen::Matrix3d& R = M_err.rotation();
-    const Eigen::Vector3d& t = M_err.translation();
-
-    // Small-angle safe approximation
-    Eigen::Vector3d omega;
-    double theta = std::acos(std::clamp((R.trace() - 1.0) / 2.0, -1.0, 1.0));
-    if (theta < 1e-6)
-      omega.setZero();
-    else
-      omega = (theta / (2.0 * std::sin(theta))) * Eigen::Vector3d(R(2,1) - R(1,2),
-                                                                  R(0,2) - R(2,0),
-                                                                  R(1,0) - R(0,1));
-    x_err.head<3>() = omega;
-    x_err.tail<3>() = t;
-  }
 }
